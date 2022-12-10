@@ -9,16 +9,16 @@ import torch
 from utils.options import args_parser
 from models.Update import LocalUpdate
 from models.Nets import ClassicNN, scDGN
-from models.Fed import FedAvg
+from models.Fed import Weight_Averaged_Aggregation
 from models.validate import validate
 
 if __name__ == '__main__':
 
     N_CELL_TYPES = {'scquery': 39, 'pbmc': 10, 'pancreas_0': 13, 'pancreas_1': 13, 'pancreas_2': 13, 'pancreas_3': 13,
-                    'pancreas_4': 13, 'pancreas_5': 13}
+                    'pancreas_4': 13, 'pancreas_5': 13, 'UWB': 2}
 
     N_GENES = {'scquery': 20499, 'pbmc': 3000, 'pancreas_0': 3000, 'pancreas_1': 3000, 'pancreas_2': 3000, 'pancreas_3': 3000,
-               'pancreas_4': 3000, 'pancreas_5': 3000}
+               'pancreas_4': 3000, 'pancreas_5': 3000, 'UWB': 55}
     # parse args
     args = args_parser()
     args.device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() and args.gpu != -1 else 'cpu')
@@ -50,16 +50,16 @@ if __name__ == '__main__':
     np.random.seed(42)
     for iter in range(args.rounds):
         # copy weights
-        w_glob = net_glob.state_dict() #initialize a global model, copy model to global
+        w_glob = net_glob.state_dict()
 
         # sample clients
-        if args.all_clients:  #all_clients are set to False as default
+        if args.all_clients:
             print("Aggregation over all clients")
             w_locals = [w_glob for i in range(args.num_users)]
-            idxs_users = np.arange(args.num_users) # if num_users : 10  idxs_users: (0,1,2,3,4,5,6,7,8,9)
+            idxs_users = np.arange(args.num_users)
         else:
-            m = max(int(args.frac * args.num_users), 1) # number of clients participated in FL
-            idxs_users = np.random.choice(range(args.num_users), m, replace=False) # select client ID for the m clients
+            m = max(int(args.frac * args.num_users), 1)
+            idxs_users = np.random.choice(range(args.num_users), m, replace=False)
             w_locals = [w_glob for i in range(idxs_users.shape[0])]
 
         for idx, user_id in enumerate(idxs_users):
@@ -68,7 +68,7 @@ if __name__ == '__main__':
 
             local = LocalUpdate(args=args, dataset=dataset_train)
             begin = time.time()
-            w = local.train(net=copy.deepcopy(net_glob).to(args.device))
+            w = local.train(net=copy.deepcopy(net_glob).to(args.device), param=w_glob)
             end = time.time()
             w_locals[idx] = copy.deepcopy(w)
             print('Round {} user {} end training, training time is {}min'.format(iter, user_id, format((end-begin)/60, '.2f')))
@@ -81,15 +81,15 @@ if __name__ == '__main__':
                 cdata = json.load(inf)
             num_samples_per_user = np.array(cdata['num_samples'])
         # aggregates weights
-        w_glob = FedAvg(w_locals, num_samples_per_user[idxs_users])
+        w_glob = Weight_Averaged_Aggregation(w_locals, num_samples_per_user[idxs_users])
 
         # copy weight to net_glob
-        net_glob.load_state_dict(w_glob)
+        # net_glob.load_state_dict(w_glob)
 
         # validate per round
-        net_glob.eval()
-        train_acc, train_loss = validate(args, net_glob, mode='train')
-        val_acc, val_loss = validate(args, net_glob, mode='val')
+        w_locals = [w_glob for i in range(args.num_users)]
+        train_acc, train_loss = validate(args, net_glob, w_locals, mode='train')
+        val_acc, val_loss = validate(args, net_glob, w_locals, mode='val')
 
         train_acc_arr = np.append(train_acc_arr, train_acc)
         train_loss_arr = np.append(train_loss_arr, train_loss)
@@ -106,8 +106,8 @@ if __name__ == '__main__':
 
 
     # report final results on test set
-    net_glob.eval()
-    test_acc, test_loss = validate(args, net_glob, mode='test')
+    w_locals = [w_glob for i in range(args.num_users)]
+    test_acc, test_loss = validate(args, net_glob, w_locals, mode='test')
     print('Final -> average test accuracy: {}%, average test loss: {}'.format(format(test_acc, '.2f'),
                                                                             format(test_loss, '.4f')))
 
