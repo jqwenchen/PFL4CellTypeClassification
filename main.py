@@ -9,10 +9,12 @@ import torch
 from torch.autograd import Variable
 from utils.options import args_parser
 from models.Update import LocalUpdate
-from models.Nets import ClassicNN, scDGN
+from models.Nets import ClassicNN, scDGN, ConvNet1D, CNN
 from models.Fed import Weight_Averaged_Aggregation
 from models.validate import validate
 from utils.vis_util import plot_pca_ct, plot_pca_all, plot_pca, extract_rep
+import matplotlib.pyplot as plt
+from sklearn.manifold import TSNE
 
 if __name__ == '__main__':
     best_acc = 0
@@ -49,6 +51,14 @@ if __name__ == '__main__':
         elif args.model == 'scDGN':
             net_glob = scDGN(d_dim=N_GENES[args.dataset], dim1=args.dim1, dim2=args.dim2,
                              dim_label=N_CELL_TYPES[args.dataset], dim_domain=args.dim3).to(args.device)
+
+        elif args.model == 'ConvNet1D':
+            net_glob = ConvNet1D(in_channels=1, out_channels=8, n_kernel=100)
+
+        elif args.model == 'CNN':
+            net_glob = ClassicNN(d_dim=N_GENES[args.dataset], dim1=args.dim1, dim2=args.dim2,
+                                 l_dim=N_CELL_TYPES[args.dataset]).to(args.device)
+
         else:
             net_glob = None
             exit('Error: unrecognized model')
@@ -190,40 +200,45 @@ if __name__ == '__main__':
 
     
     # plot acc and loss curve
-    plt.figure(figsize=(10, 10))
-    for idx, y_label in enumerate(['Training Accuracy', 'Training Loss', 'Val Accuracy', 'Val Loss']):
-        ax = plt.subplot(2, 2, idx+1)
-        X = np.arange(1, train_acc_arr.shape[0] + 1)
-        if idx == 0:
-            ax.plot(X, train_acc_arr)
-        elif idx == 1:
-            ax.plot(X, train_loss_arr)
-        elif idx == 2:
-            ax.plot(X, val_acc_arr)
-        elif idx == 3:
-            ax.plot(X, val_loss_arr)
-
-        ax.set(ylabel=y_label, xlabel='Global Rounds')
-    plt.savefig('./save/nn_{}_{}.png'.format(args.dataset, args.model))
+    # plt.figure(figsize=(10, 10))
+    # for idx, y_label in enumerate(['Training Accuracy', 'Training Loss', 'Val Accuracy', 'Val Loss']):
+    #     ax = plt.subplot(2, 2, idx+1)
+    #     X = np.arange(1, train_acc_arr.shape[0] + 1)
+    #     if idx == 0:
+    #         ax.plot(X, train_acc_arr)
+    #     elif idx == 1:
+    #         ax.plot(X, train_loss_arr)
+    #     elif idx == 2:
+    #         ax.plot(X, val_acc_arr)
+    #     elif idx == 3:
+    #         ax.plot(X, val_loss_arr)
+    #
+    #     ax.set(ylabel=y_label, xlabel='Global Rounds')
+    # plt.savefig('./save/nn_{}_{}.png'.format(args.dataset, args.model))
     #plt.show()
 
     n_genes = 100
     cell_names = ['cell' + str(i) for i in range(N_CELL_TYPES[args.dataset])]
     gene_names = ['gene' + str(i) for i in range(N_GENES[args.dataset])]
     out_path = 'eval/'
+
+    all_representations = []
+    all_labels = []
     for idx in range(len(w_per)):
         net_glob.load_state_dict(w_per[idx])
 
         NN_representations, NN_labels, NN_domains = extract_rep(net_glob, idx, args)
-        #scDGN_representations, scDGN_labels, scDGN_domains = extract_rep(t_scDGN, d_scDGN, scDGN=True)
+        all_representations.append(NN_representations)
+        all_labels.append(NN_labels)
+
+        # plot pca for each user
         if not os.path.exists('eval/user{}/{}'.format(idx, args.dataset)):
             os.mkdir('eval/user{}/{}'.format(idx, args.dataset))
             os.mkdir('eval/user{}/{}/NN'.format(idx, args.dataset))
         plot_pca(NN_representations, NN_labels, NN_domains, 'NN', idx, expname=args.dataset,
                  nlabels=N_CELL_TYPES[args.dataset])
-        # plot_pca_ct(NN_representations, NN_labels, NN_domains, 'NN', expname=args.dataset)
-        # plot_pca_all(NN_representations, NN_labels, NN_domains, 'NN', expname=args.dataset, nlabels=N_CELL_TYPES[args.dataset])
 
+        # feature importance
         for cate_id in range(N_CELL_TYPES[args.dataset]):
             counts = 0.
             mean_value_ori = np.zeros(N_GENES[args.dataset])
@@ -252,3 +267,19 @@ if __name__ == '__main__':
                 for index in diff_NN_ids:
                     fw.write('%s\n'%(gene_names[index]))
 
+    # t-SNE plot
+    fig = plt.figure()
+    for idx in range(len(all_labels)):
+        ts = TSNE(n_components=2, init='pca', random_state=0)
+        data = ts.fit_transform(all_representations[idx])
+        x_min, x_max = np.min(data, 0), np.max(data, 0)
+        data = (data - x_min) / (x_max - x_min)     # 对数据进行归一化处理
+        # 遍历所有样本
+        for i in range(data.shape[0]):
+            # 在图中为每个数据点画出标签
+            plt.text(data[i, 0], data[i, 1], str(idx), color=plt.cm.Set1(all_labels[idx][i] / N_CELL_TYPES[args.dataset]),
+                     fontdict={'weight': 'bold', 'size': 7})
+    plt.xticks()        # 指定坐标的刻度
+    plt.yticks()
+    plt.title('t-SNE', fontsize=14)
+    plt.show()

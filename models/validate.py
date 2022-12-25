@@ -1,12 +1,14 @@
 import numpy as np
 from torchvision import datasets, transforms
 from .test import test_img
-def validate(args, net_glob, mode=None):
-    nc_arr = np.array([])
-    nall_arr = np.array([])
-    acc_arr = np.array([])
-    loss_arr = np.array([])
+# from .test_0 import test_img
+def validate(args, net_glob, w,  mode=None):
+    nc_arr = np.array([])   #nc: number of correct
+    nall_arr = np.array([]) #nall: length of dataset
+    acc_arr = np.array([])  #acc: accuracy
+    loss_arr = np.array([]) #loss
     for idx in range(args.num_users):
+        net_glob.load_state_dict(w[idx])
         if mode == 'train':
             dataset = datasets.scDGN('data/{}/'.format(args.dataset), user_id=idx, mode='train',
                                                  transform=transforms.ToTensor())
@@ -22,6 +24,9 @@ def validate(args, net_glob, mode=None):
             print('invalid mode!')
 
         nc, nall, acc, loss = test_img(net_glob, dataset, args)
+        if mode == 'test':
+            print("User {} test accuracy: {}".format(idx, acc))
+        # append the value for each client
         nc_arr = np.append(nc_arr, nc)
         nall_arr = np.append(nall_arr, nall)
         acc_arr = np.append(acc_arr, acc)
