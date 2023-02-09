@@ -1,4 +1,4 @@
-# Single-Cell-Type-Classification-with-PFL
+# Personalized Federated Learning for Cell type Classification
 
 ### Prepare Datset
 
